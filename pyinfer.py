@@ -52,7 +52,7 @@ def run_infer_cmd():
 
     project_dir = re.search(r'([^/]+)(?=\.git)', project_repo).group(0)
     if os.path.exists(project_dir):
-        print(project_dir + 'exsits')
+        print(project_dir + ' exists')
     else:
         # clone git repo to local
         call_result = subprocess.call(['git', 'clone', project_repo])
