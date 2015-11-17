@@ -1,77 +1,109 @@
+#!/usr/bin/python
+
 """
     Pyinfer
     ~~~~~~~
 
-    A infer wrapper to produce well-formatted analyzed result
+    An infer wrapper to produce well-formatted analyzed result
 
-    :copyright: (c) 2015 liangfeizc
+    :copyright: (c) 2015 liangfeizc.com
     :license: MIT, see LICENSE for more details
 
 """
 
-import subprocess
 import argparse
-import shutil
-import re
+import csv
+import json
+import uuid
 import os
+import re
+from subprocess import check_output
+
+import requests
+
+
+class Infer:
+    def __init__(self, repo, branch):
+        self.repo = repo
+        self.branch = branch
+        self.report_path = 'infer-out/report.csv'
+        self.server = 'http://127.0.0.1:8000/staticscan/issues/'
+        self.workspace = ''
+        self.scan_id = ''
+
+    def run_infer(self, workspace=os.getcwd()):
+        print('run infer...')
+        self.workspace = workspace
+        self.scan_id = self.generate_scan_id()
+        project = self.clone_source()
+        os.chdir(os.path.join(self.workspace, project))
+        check_output(['./gradlew', 'clean'])
+        check_output(['infer', '--', './gradlew', 'build'])
+        self.upload_report()
+
+    def clone_source(self):
+        print('clone source...')
+        os.chdir(self.workspace)
+        project = re.search(r'([^/]+)(?=\.git)', self.repo).group(0)
+        if os.path.exists(project):
+            # shutil.rmtree(project)
+            os.chdir(project)
+            check_output(['git', 'reset', '--hard'])
+            check_output(['git', 'pull'])
+        else:
+            check_output(['git', 'clone', '--single-branch', '-b', self.branch, self.repo])
+        return project
+
+    def upload_report(self):
+        print('upload report...')
+        report = self.parse_result()
+        if not report:
+            return
+        data = {'data': json.dumps(report)}
+        ret = ''
+        try:
+            r = requests.post(self.server, data=data)
+            ret = r.text
+        except Exception as e:
+            print(e)
+        return ret
+
+    def parse_result(self):
+        print('parse result...')
+        with open(self.report_path, 'rU') as report:
+            reader = csv.DictReader(report)
+            report_list = []
+            for row in reader:
+                report_list.append(
+                    {
+                        'error': row['type'] + ":" + row['qualifier'],
+                        'source': row['procedure_id'],
+                        'scan_id': self.scan_id,
+                        'line_no': row['line'],
+                        'file_name': row['file'],
+                        'repo': self.repo,
+                        'branch': self.branch
+                    })
+            return report_list
+
+    def generate_scan_id(self):
+        return str(uuid.uuid1())
 
 
 def parse_args():
-    """
-    Parse command line arguments
-    :return: git repo and project type
-    """
     parser = argparse.ArgumentParser()
-
-    parser.add_argument('--infer',
-                        help='Path to the infer. If not specified it assumes infer is in your path',
-                        default='infer')
-
-    parser.add_argument('--repo',
-                        help='git repository for the project to be inferred.')
-
-    parser.add_argument('--type',
-                        help='Android or iOS',
-                        default='Android')
-
+    parser.add_argument('-r', '--repo', help='Your repository')
+    parser.add_argument('-b', '--branch', default='master', help='Branch of the repository')
+    parser.add_argument('-w', '--workspace', default=os.getcwd(), help='Workspace to run infer')
     args = parser.parse_args()
-
-    return args.infer, args.repo, args.type
-
-
-def run_infer_cmd():
-    """
-    Run infer command in the shell
-    :return:
-    """
-
-    infer, project_repo, project_type = parse_args()
-    if not project_repo:
-        print('You must specify the git repo address')
-        return
-
-    project_dir = re.search(r'([^/]+)(?=\.git)', project_repo).group(0)
-    if os.path.exists(project_dir):
-        print(project_dir + ' exists')
-    else:
-        # clone git repo to local
-        call_result = subprocess.call(['git', 'clone', project_repo])
-        if call_result > 0:
-            print('failed to clone the repo ' + project_repo)
-            return
-
-    # Enter the project directory
-    working_dir = os.path.join(os.getcwd(), project_dir)
-
-    # Use gradle to build android project
-    if project_type.lower() == 'android':
-        p = subprocess.Popen([infer, '--', './gradlew', 'clean', 'build'], cwd=working_dir)
-        p.wait()
+    return args.repo, args.branch, args.workspace
 
 
 def main():
-    run_infer_cmd()
-
+    repo, branch, workspace = parse_args()
+    infer = Infer(repo, branch)
+    infer.run_infer(workspace)
 
 if __name__ == '__main__':
     main()
+
