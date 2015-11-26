@@ -46,4 +46,4 @@ def update_source(project_path):
 
 
 def clone_source(repo, branch):
-    subprocess.check_output(['git', 'clone', '--single-branch', '-b', branch, 'repo'])
+    print(subprocess.check_output(['git', 'clone', '--single-branch', '-b', branch, repo]))
